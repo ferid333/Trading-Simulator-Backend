@@ -7,7 +7,6 @@ import com.trading.app.client.dto.TwelveDataTimeSeriesResponse;
 import com.trading.app.client.dto.TwelveDataTimeSeriesValue;
 import com.trading.app.domain.HistoricalPrice;
 import com.trading.app.domain.Scenario;
-import com.trading.app.domain.ScenarioType;
 import com.trading.app.domain.SimulationSession;
 import com.trading.app.domain.Stock;
 import com.trading.app.repository.HistoricalPriceRepository;
@@ -37,15 +36,19 @@ public class PriceService {
 		this.historicalPriceRepository = historicalPriceRepository;
 	}
 
-	public PriceResponse getSessionPrice(SimulationSession session, Stock stock) {
-		if (session.getScenario().getType() == ScenarioType.LIVE) {
-			return getLivePrice(session.getScenario(), stock);
-		}
-		return getHistoricalSessionPrice(session.getScenario(), stock, session.getCurrentDate());
+	public PriceResponse getPrice(SimulationSession session, Stock stock) {
+		return session.getScenario().getPrice(stock, session.getCurrentDate(), this);
 	}
 
-	public List<PriceResponse> getSessionPrices(SimulationSession session, List<Stock> stocks) {
-		return stocks.stream().map(stock -> getSessionPrice(session, stock)).toList();
+	public PriceResponse getPrice(Scenario scenario, Stock stock) {
+		return scenario.getPrice(stock, scenario.getInitialMarketDate(), this);
+	}
+
+	public PriceResponse getPrice(Scenario scenario, Stock stock, LocalDate marketDate) {
+		if (marketDate == null) {
+			marketDate = scenario.getInitialMarketDate();
+		}
+		return scenario.getPrice(stock, marketDate, this);
 	}
 
 	public PriceResponse getLivePrice(Scenario scenario, Stock stock) {

@@ -11,7 +11,6 @@ import com.trading.app.api.dto.PriceResponse;
 import com.trading.app.domain.Holding;
 import com.trading.app.domain.OrderSide;
 import com.trading.app.domain.Scenario;
-import com.trading.app.domain.ScenarioType;
 import com.trading.app.domain.SimulationSession;
 import com.trading.app.domain.Stock;
 import com.trading.app.domain.TradeOrder;
@@ -64,7 +63,7 @@ public class PortfolioService {
 		UserAccount owner = getUser(username);
 		Scenario scenario = scenarioService.getByCode(request.scenarioCode());
 		BigDecimal startingBalance = scale(request.startingBalance());
-		LocalDate currentDate = scenario.getType() == ScenarioType.HISTORICAL ? scenario.getStartDate() : null;
+		LocalDate currentDate = scenario.getInitialMarketDate();
 
 		SimulationSession portfolio = sessionRepository.findByOwnerUsernameIgnoreCase(username)
 			.orElseGet(() -> new SimulationSession(owner, scenario, startingBalance, startingBalance, currentDate, Instant.now()));
@@ -91,7 +90,9 @@ public class PortfolioService {
 
 		List<PortfolioHoldingResponse> items = holdings.stream().map(holding -> {
 			PriceResponse price = prices.computeIfAbsent(holding.getStock().getSymbol(),
-				key -> priceService.getSessionPrice(session, holding.getStock()));
+				key -> session.getCurrentDate() == null
+					? priceService.getPrice(session.getScenario(), holding.getStock())
+					: priceService.getPrice(session.getScenario(), holding.getStock(), session.getCurrentDate()));
 			BigDecimal marketValue = price.price().multiply(BigDecimal.valueOf(holding.getQuantity()));
 			BigDecimal costBasis = holding.getAverageBuyPrice().multiply(BigDecimal.valueOf(holding.getQuantity()));
 			return new PortfolioHoldingResponse(
@@ -123,7 +124,11 @@ public class PortfolioService {
 	@Transactional
 	public List<PriceResponse> getPrices(String username) {
 		SimulationSession session = getRequiredPortfolio(username);
-		return priceService.getSessionPrices(session, stockRepository.findAll());
+		return stockRepository.findAll().stream()
+			.map(stock -> session.getCurrentDate() == null
+				? priceService.getPrice(session.getScenario(), stock)
+				: priceService.getPrice(session.getScenario(), stock, session.getCurrentDate()))
+			.toList();
 	}
 
 	@Transactional(readOnly = true)
@@ -150,11 +155,7 @@ public class PortfolioService {
 		holdingRepository.deleteAllBySession(session);
 		tradeOrderRepository.deleteAllBySession(session);
 		session.setCashBalance(session.getStartingBalance());
-		if (session.getScenario().getType() == ScenarioType.HISTORICAL) {
-			session.setCurrentDate(session.getScenario().getStartDate());
-		} else {
-			session.setCurrentDate(null);
-		}
+		session.setCurrentDate(session.getScenario().getResetMarketDate());
 		SimulationSession saved = sessionRepository.save(session);
 		return toPortfolioStateResponse(saved);
 	}
@@ -162,12 +163,9 @@ public class PortfolioService {
 	@Transactional
 	public AdvancePortfolioResponse advance(String username) {
 		SimulationSession session = getRequiredPortfolio(username);
-		if (session.getScenario().getType() != ScenarioType.HISTORICAL) {
-			throw new BadRequestException("Only historical portfolios can be advanced");
-		}
 		Stock referenceStock = stockRepository.findAll().stream().findFirst()
 			.orElseThrow(() -> new NotFoundException("No stocks configured"));
-		LocalDate nextDate = priceService.findNextTradingDay(referenceStock, session.getCurrentDate());
+		LocalDate nextDate = session.getScenario().advanceMarketDate(referenceStock, session.getCurrentDate(), priceService);
 		session.setCurrentDate(nextDate);
 		sessionRepository.save(session);
 		return new AdvancePortfolioResponse(session.getScenario().getCode(), session.getCurrentDate());
@@ -186,7 +184,7 @@ public class PortfolioService {
 	private OrderResponse placeOrder(String username, PlaceOrderRequest request, OrderSide side) {
 		SimulationSession session = getRequiredPortfolio(username);
 		Stock stock = stockService.getBySymbol(request.symbol());
-		PriceResponse marketPrice = priceService.getSessionPrice(session, stock);
+		PriceResponse marketPrice = priceService.getPrice(session, stock);
 		BigDecimal totalValue = scale(marketPrice.price().multiply(BigDecimal.valueOf(request.quantity())));
 		Holding holding = holdingRepository.findBySessionAndStock(session, stock).orElse(null);
 

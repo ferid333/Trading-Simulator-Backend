@@ -1,7 +1,8 @@
 package com.trading.app.bootstrap;
 
+import com.trading.app.domain.HistoricalScenario;
+import com.trading.app.domain.LiveScenario;
 import com.trading.app.domain.Scenario;
-import com.trading.app.domain.ScenarioType;
 import com.trading.app.domain.Stock;
 import com.trading.app.repository.ScenarioRepository;
 import com.trading.app.repository.StockRepository;
@@ -32,10 +33,10 @@ public class DataInitializer implements CommandLineRunner {
 			return;
 		}
 		scenarioRepository.saveAll(List.of(
-			new Scenario("LIVE", "Live Market", ScenarioType.LIVE, null, "Trade against current market prices."),
-			new Scenario("COVID", "COVID Crash", ScenarioType.HISTORICAL, LocalDate.of(2020, 3, 2),
+			new LiveScenario("LIVE", "Live Market", "Trade against current market prices."),
+			new HistoricalScenario("COVID", "COVID Crash", LocalDate.of(2020, 3, 2),
 				"Starts at the 2020 COVID market crash."),
-			new Scenario("FINANCIAL_CRISIS", "Financial Crisis", ScenarioType.HISTORICAL, LocalDate.of(2008, 9, 15),
+			new HistoricalScenario("FINANCIAL_CRISIS", "Financial Crisis", LocalDate.of(2008, 9, 15),
 				"Starts at the 2008 global financial crisis.")
 		));
 	}
