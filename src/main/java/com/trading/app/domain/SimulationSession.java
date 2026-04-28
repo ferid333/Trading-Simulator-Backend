@@ -8,11 +8,11 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.UUID;
 
 @Entity
 @Table(name = "simulation_sessions")
@@ -22,8 +22,9 @@ public class SimulationSession {
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
-	@Column(nullable = false, unique = true, updatable = false)
-	private UUID sessionId;
+	@OneToOne(fetch = FetchType.LAZY, optional = false)
+	@JoinColumn(name = "user_id", nullable = false, unique = true)
+	private UserAccount owner;
 
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "scenario_id", nullable = false)
@@ -44,9 +45,9 @@ public class SimulationSession {
 	protected SimulationSession() {
 	}
 
-	public SimulationSession(UUID sessionId, Scenario scenario, BigDecimal startingBalance, BigDecimal cashBalance,
+	public SimulationSession(UserAccount owner, Scenario scenario, BigDecimal startingBalance, BigDecimal cashBalance,
 		LocalDate currentDate, Instant createdAt) {
-		this.sessionId = sessionId;
+		this.owner = owner;
 		this.scenario = scenario;
 		this.startingBalance = startingBalance;
 		this.cashBalance = cashBalance;
@@ -58,16 +59,24 @@ public class SimulationSession {
 		return id;
 	}
 
-	public UUID getSessionId() {
-		return sessionId;
+	public UserAccount getOwner() {
+		return owner;
 	}
 
 	public Scenario getScenario() {
 		return scenario;
 	}
 
+	public void setScenario(Scenario scenario) {
+		this.scenario = scenario;
+	}
+
 	public BigDecimal getStartingBalance() {
 		return startingBalance;
+	}
+
+	public void setStartingBalance(BigDecimal startingBalance) {
+		this.startingBalance = startingBalance;
 	}
 
 	public BigDecimal getCashBalance() {

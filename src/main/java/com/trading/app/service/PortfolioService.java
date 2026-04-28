@@ -1,13 +1,13 @@
 package com.trading.app.service;
 
-import com.trading.app.api.dto.AdvanceSessionResponse;
-import com.trading.app.api.dto.CreateSessionRequest;
+import com.trading.app.api.dto.AdvancePortfolioResponse;
+import com.trading.app.api.dto.InitializePortfolioRequest;
 import com.trading.app.api.dto.OrderResponse;
 import com.trading.app.api.dto.PlaceOrderRequest;
 import com.trading.app.api.dto.PortfolioHoldingResponse;
 import com.trading.app.api.dto.PortfolioResponse;
+import com.trading.app.api.dto.PortfolioStateResponse;
 import com.trading.app.api.dto.PriceResponse;
-import com.trading.app.api.dto.SessionResponse;
 import com.trading.app.domain.Holding;
 import com.trading.app.domain.OrderSide;
 import com.trading.app.domain.Scenario;
@@ -15,10 +15,12 @@ import com.trading.app.domain.ScenarioType;
 import com.trading.app.domain.SimulationSession;
 import com.trading.app.domain.Stock;
 import com.trading.app.domain.TradeOrder;
+import com.trading.app.domain.UserAccount;
 import com.trading.app.repository.HoldingRepository;
 import com.trading.app.repository.SimulationSessionRepository;
 import com.trading.app.repository.StockRepository;
 import com.trading.app.repository.TradeOrderRepository;
+import com.trading.app.repository.UserAccountRepository;
 import com.trading.app.service.exception.BadRequestException;
 import com.trading.app.service.exception.NotFoundException;
 import java.math.BigDecimal;
@@ -28,12 +30,11 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class SessionService {
+public class PortfolioService {
 
 	private final ScenarioService scenarioService;
 	private final StockService stockService;
@@ -42,10 +43,12 @@ public class SessionService {
 	private final HoldingRepository holdingRepository;
 	private final TradeOrderRepository tradeOrderRepository;
 	private final StockRepository stockRepository;
+	private final UserAccountRepository userAccountRepository;
 
-	public SessionService(ScenarioService scenarioService, StockService stockService, PriceService priceService,
+	public PortfolioService(ScenarioService scenarioService, StockService stockService, PriceService priceService,
 		SimulationSessionRepository sessionRepository, HoldingRepository holdingRepository,
-		TradeOrderRepository tradeOrderRepository, StockRepository stockRepository) {
+		TradeOrderRepository tradeOrderRepository, StockRepository stockRepository,
+		UserAccountRepository userAccountRepository) {
 		this.scenarioService = scenarioService;
 		this.stockService = stockService;
 		this.priceService = priceService;
@@ -53,29 +56,35 @@ public class SessionService {
 		this.holdingRepository = holdingRepository;
 		this.tradeOrderRepository = tradeOrderRepository;
 		this.stockRepository = stockRepository;
+		this.userAccountRepository = userAccountRepository;
 	}
 
 	@Transactional
-	public SessionResponse createSession(CreateSessionRequest request) {
+	public PortfolioStateResponse initializePortfolio(String username, InitializePortfolioRequest request) {
+		UserAccount owner = getUser(username);
 		Scenario scenario = scenarioService.getByCode(request.scenarioCode());
 		BigDecimal startingBalance = scale(request.startingBalance());
 		LocalDate currentDate = scenario.getType() == ScenarioType.HISTORICAL ? scenario.getStartDate() : null;
-		SimulationSession session = new SimulationSession(
-			UUID.randomUUID(),
-			scenario,
-			startingBalance,
-			startingBalance,
-			currentDate,
-			Instant.now()
-		);
-		SimulationSession saved = sessionRepository.save(session);
-		return new SessionResponse(saved.getSessionId(), scenario.getCode(), saved.getStartingBalance(), saved.getCashBalance(),
-			saved.getCurrentDate());
+
+		SimulationSession portfolio = sessionRepository.findByOwnerUsernameIgnoreCase(username)
+			.orElseGet(() -> new SimulationSession(owner, scenario, startingBalance, startingBalance, currentDate, Instant.now()));
+
+		if (portfolio.getId() != null) {
+			holdingRepository.deleteAllBySession(portfolio);
+			tradeOrderRepository.deleteAllBySession(portfolio);
+			portfolio.setScenario(scenario);
+			portfolio.setStartingBalance(startingBalance);
+			portfolio.setCashBalance(startingBalance);
+			portfolio.setCurrentDate(currentDate);
+		}
+
+		SimulationSession saved = sessionRepository.save(portfolio);
+		return toPortfolioStateResponse(saved);
 	}
 
 	@Transactional
-	public PortfolioResponse getPortfolio(UUID sessionId) {
-		SimulationSession session = getSession(sessionId);
+	public PortfolioResponse getPortfolio(String username) {
+		SimulationSession session = getRequiredPortfolio(username);
 		List<Holding> holdings = holdingRepository.findAllBySession(session);
 		Map<String, PriceResponse> prices = new HashMap<>();
 		BigDecimal holdingsValue = BigDecimal.ZERO;
@@ -101,7 +110,6 @@ public class SessionService {
 		}
 
 		return new PortfolioResponse(
-			session.getSessionId(),
 			session.getScenario().getCode(),
 			session.getCurrentDate(),
 			session.getStartingBalance(),
@@ -113,64 +121,70 @@ public class SessionService {
 	}
 
 	@Transactional
-	public List<PriceResponse> getPrices(UUID sessionId) {
-		SimulationSession session = getSession(sessionId);
+	public List<PriceResponse> getPrices(String username) {
+		SimulationSession session = getRequiredPortfolio(username);
 		return priceService.getSessionPrices(session, stockRepository.findAll());
 	}
 
 	@Transactional(readOnly = true)
-	public List<OrderResponse> getOrders(UUID sessionId) {
-		SimulationSession session = getSession(sessionId);
+	public List<OrderResponse> getOrders(String username) {
+		SimulationSession session = getRequiredPortfolio(username);
 		return tradeOrderRepository.findAllBySessionOrderByExecutedAtDesc(session).stream()
 			.map(this::toOrderResponse)
 			.toList();
 	}
 
 	@Transactional
-	public OrderResponse buy(UUID sessionId, PlaceOrderRequest request) {
-		return placeOrder(sessionId, request, OrderSide.BUY);
+	public OrderResponse buy(String username, PlaceOrderRequest request) {
+		return placeOrder(username, request, OrderSide.BUY);
 	}
 
 	@Transactional
-	public OrderResponse sell(UUID sessionId, PlaceOrderRequest request) {
-		return placeOrder(sessionId, request, OrderSide.SELL);
+	public OrderResponse sell(String username, PlaceOrderRequest request) {
+		return placeOrder(username, request, OrderSide.SELL);
 	}
 
 	@Transactional
-	public SessionResponse reset(UUID sessionId) {
-		SimulationSession session = getSession(sessionId);
+	public PortfolioStateResponse reset(String username) {
+		SimulationSession session = getRequiredPortfolio(username);
 		holdingRepository.deleteAllBySession(session);
 		tradeOrderRepository.deleteAllBySession(session);
 		session.setCashBalance(session.getStartingBalance());
 		if (session.getScenario().getType() == ScenarioType.HISTORICAL) {
 			session.setCurrentDate(session.getScenario().getStartDate());
+		} else {
+			session.setCurrentDate(null);
 		}
 		SimulationSession saved = sessionRepository.save(session);
-		return new SessionResponse(saved.getSessionId(), saved.getScenario().getCode(), saved.getStartingBalance(),
-			saved.getCashBalance(), saved.getCurrentDate());
+		return toPortfolioStateResponse(saved);
 	}
 
 	@Transactional
-	public AdvanceSessionResponse advance(UUID sessionId) {
-		SimulationSession session = getSession(sessionId);
+	public AdvancePortfolioResponse advance(String username) {
+		SimulationSession session = getRequiredPortfolio(username);
 		if (session.getScenario().getType() != ScenarioType.HISTORICAL) {
-			throw new BadRequestException("Only historical sessions can be advanced");
+			throw new BadRequestException("Only historical portfolios can be advanced");
 		}
 		Stock referenceStock = stockRepository.findAll().stream().findFirst()
 			.orElseThrow(() -> new NotFoundException("No stocks configured"));
 		LocalDate nextDate = priceService.findNextTradingDay(referenceStock, session.getCurrentDate());
 		session.setCurrentDate(nextDate);
 		sessionRepository.save(session);
-		return new AdvanceSessionResponse(session.getSessionId(), session.getScenario().getCode(), session.getCurrentDate());
+		return new AdvancePortfolioResponse(session.getScenario().getCode(), session.getCurrentDate());
 	}
 
-	public SimulationSession getSession(UUID sessionId) {
-		return sessionRepository.findBySessionId(sessionId)
-			.orElseThrow(() -> new NotFoundException("Session not found: " + sessionId));
+	private SimulationSession getRequiredPortfolio(String username) {
+		return sessionRepository.findByOwnerUsernameIgnoreCase(username)
+			.orElseThrow(() -> new NotFoundException("Portfolio not initialized for user: " + username));
 	}
 
-	private OrderResponse placeOrder(UUID sessionId, PlaceOrderRequest request, OrderSide side) {
-		SimulationSession session = getSession(sessionId);
+	private UserAccount getUser(String username) {
+		return userAccountRepository.findByUsernameIgnoreCase(username)
+			.orElseThrow(() -> new NotFoundException("User not found: " + username));
+	}
+
+	private OrderResponse placeOrder(String username, PlaceOrderRequest request, OrderSide side) {
+		SimulationSession session = getRequiredPortfolio(username);
 		Stock stock = stockService.getBySymbol(request.symbol());
 		PriceResponse marketPrice = priceService.getSessionPrice(session, stock);
 		BigDecimal totalValue = scale(marketPrice.price().multiply(BigDecimal.valueOf(request.quantity())));
@@ -230,6 +244,15 @@ public class SessionService {
 			order.getTotalValue(),
 			order.getScenarioMarketDate(),
 			order.getExecutedAt()
+		);
+	}
+
+	private PortfolioStateResponse toPortfolioStateResponse(SimulationSession session) {
+		return new PortfolioStateResponse(
+			session.getScenario().getCode(),
+			session.getStartingBalance(),
+			session.getCashBalance(),
+			session.getCurrentDate()
 		);
 	}
 

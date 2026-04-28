@@ -2,7 +2,7 @@ spring:
   application:
     name: trading-simulator-backend
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/trading_simulator}
+    url: jdbc:mysql://localhost:3306/trading_simulator
     username: root
     password: admin
     driver-class-name: com.mysql.cj.jdbc.Driver

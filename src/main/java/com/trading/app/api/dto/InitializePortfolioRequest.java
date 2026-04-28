@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 
-public record CreateSessionRequest(
+public record InitializePortfolioRequest(
 	@NotBlank String scenarioCode,
 	@NotNull @DecimalMin(value = "1.00") BigDecimal startingBalance
 ) {

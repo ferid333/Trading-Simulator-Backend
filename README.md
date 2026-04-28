@@ -4,7 +4,7 @@ Spring Boot REST backend for a university trading simulator project.
 
 ## Features
 
-- Anonymous simulation sessions
+- User authentication with one portfolio per account
 - User-defined starting balance in USD
 - Five fixed stocks across all scenarios
 - `LIVE`, `COVID`, and `FINANCIAL_CRISIS` scenarios
@@ -27,23 +27,37 @@ Spring Boot REST backend for a university trading simulator project.
 
 Base path: `/api`
 
+- `POST /auth/register`
 - `GET /scenarios`
 - `GET /stocks`
-- `POST /sessions`
-- `GET /sessions/{sessionId}/portfolio`
-- `GET /sessions/{sessionId}/prices`
-- `GET /sessions/{sessionId}/orders`
-- `POST /sessions/{sessionId}/orders/buy`
-- `POST /sessions/{sessionId}/orders/sell`
-- `POST /sessions/{sessionId}/reset`
-- `POST /sessions/{sessionId}/advance`
+- `POST /portfolio`
+- `GET /portfolio`
+- `GET /prices`
+- `GET /orders`
+- `POST /orders/buy`
+- `POST /orders/sell`
+- `POST /portfolio/reset`
+- `POST /portfolio/advance`
 
 ## Example
 
-Create a session:
+Register a user:
 
 ```http
-POST /api/sessions
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "password123"
+}
+```
+
+Initialize the authenticated user's portfolio:
+
+```http
+POST /api/portfolio
+Authorization: Basic base64(alice:password123)
 Content-Type: application/json
 
 {
@@ -55,7 +69,8 @@ Content-Type: application/json
 Buy shares:
 
 ```http
-POST /api/sessions/{sessionId}/orders/buy
+POST /api/orders/buy
+Authorization: Basic base64(alice:password123)
 Content-Type: application/json
 
 {
@@ -67,7 +82,8 @@ Content-Type: application/json
 Advance one historical trading day:
 
 ```http
-POST /api/sessions/{sessionId}/advance
+POST /api/portfolio/advance
+Authorization: Basic base64(alice:password123)
 ```
 
 ## Configuration
